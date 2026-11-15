@@ -1,5 +1,10 @@
 """
-Portfolio configuration — risk tiers, asset universe, commission schedule, currency settings.
+Portfolio configuration — risk tiers, expanded 15-ETF universe, commission schedule,
+currency settings.
+
+Asset universe spans: US large-cap, global, sectors (tech, financials, energy,
+healthcare), international developed & emerging, small-cap, REITs, TIPS, long
+treasury, broad bond, gold, and broad commodities.
 """
 
 # ── Account & Currency ───────────────────────────────────────────────
@@ -9,7 +14,7 @@ TOTAL_USD = TOTAL_ILS / USD_ILS_RATE  # ~$46,775
 
 # IBKR margin loan rates (approximate, tiered)
 IBKR_MARGIN_RATES = {
-    "USD": {0: 6.83, 100_000: 6.33, 1_000_000: 5.83},      # BM + spread
+    "USD": {0: 6.83, 100_000: 6.33, 1_000_000: 5.83},
     "ILS": {0: 7.198, 100_000: 6.698, 1_000_000: 6.198},
 }
 
@@ -22,63 +27,79 @@ COMMISSIONS = {
     "BOND":   {"per_face_value_bps": 0.1, "min": 5.00},
 }
 
-# ── Asset Universe ───────────────────────────────────────────────────
+# ── Asset Universe (15 ETFs) ────────────────────────────────────────
 # {ticker: (contract_id, asset_class, description)}
 ASSET_UNIVERSE = {
     # Core equity
-    "SPY":  (756733,    "equity_us_large",    "S&P 500 ETF"),
-    "VT":   (52197301,  "equity_global",      "Vanguard Total World Stock"),
-    "VTI":  (12340041,  "equity_us_total",    "Vanguard Total US Stock Market"),
-    "SPYV": (45540652,  "equity_us_value",    "S&P 500 Value ETF"),
-    "SPYG": (45540799,  "equity_us_growth",   "S&P 500 Growth ETF"),
+    "SPY":  (756733,     "equity_us_large",     "S&P 500 ETF"),
+    "VT":   (52197301,   "equity_global",       "Vanguard Total World Stock"),
+    # Sectors
+    "XLK":  (4215230,    "sector_technology",   "Technology Select Sector SPDR"),
+    "XLF":  (4215220,    "sector_financials",   "Financial Select Sector SPDR"),
+    "XLE":  (4215217,    "sector_energy",       "Energy Select Sector SPDR"),
+    "XLV":  (4215205,    "sector_healthcare",   "Health Care Select Sector SPDR"),
+    # International
+    "EFA":  (13002510,   "equity_intl_dev",     "iShares MSCI EAFE (Developed ex-US)"),
+    "EEM":  (6604766,    "equity_intl_em",      "iShares MSCI Emerging Markets"),
+    # Small-cap
+    "IWM":  (9579970,    "equity_us_small",     "iShares Russell 2000"),
     # Fixed income
-    "BND":  (43645828,  "bond_us_total",      "Vanguard Total Bond Market"),
-    "TLT":  (15547841,  "bond_us_long",       "iShares 20+ Year Treasury"),
-    "BNDX": (128835017, "bond_intl",          "Vanguard Total International Bond"),
-    "VWOB": (128835014, "bond_em",            "Vanguard Emerging Markets Gov Bond"),
-    # Commodities / Real assets
-    "GLD":  (51529211,  "commodity_gold",     "SPDR Gold Shares"),
-    "GLDM": (543859629, "commodity_gold_mini", "SPDR Gold MiniShares (lower cost)"),
-    # Existing positions
-    "NVDA": (4815747,   "equity_us_tech",     "NVIDIA Corp"),
-    "SNDK": (760250490, "equity_us_tech",     "Western Digital / SanDisk"),
+    "BND":  (43645828,   "bond_us_total",       "Vanguard Total Bond Market"),
+    "TLT":  (15547841,   "bond_us_long",        "iShares 20+ Year Treasury"),
+    "TIP":  (26787475,   "bond_tips",           "iShares TIPS Bond ETF"),
+    # Real assets
+    "GLD":  (51529211,   "commodity_gold",      "SPDR Gold Shares"),
+    "VNQ":  (31230302,   "reit",                "Vanguard Real Estate ETF"),
+    "DBC":  (319355208,  "commodity_broad",     "Invesco DB Commodity Index"),
+    # Existing positions (not in allocation model, tracked separately)
+    "NVDA": (4815747,    "equity_us_tech",      "NVIDIA Corp"),
+    "SNDK": (760250490,  "equity_us_tech",      "Western Digital / SanDisk"),
 }
 
+# Tickers in the allocation model (excludes individual stock positions)
+ALLOCATION_TICKERS = [
+    "SPY", "VT", "XLK", "XLF", "XLE", "XLV",
+    "EFA", "EEM", "IWM",
+    "BND", "TLT", "TIP",
+    "GLD", "VNQ", "DBC",
+]
+
 # ── Risk Tiers ───────────────────────────────────────────────────────
-# Each tier defines target allocation weights by asset class bucket.
-# Weights must sum to 1.0
+# Direct ticker-based weights. Weights (including cash) sum to 1.0.
+# Designed for broad diversification across asset classes, sectors,
+# geographies, and real assets per Brinson-Hood (1986), Ang (2014).
+
 RISK_TIERS = {
     "conservative": {
         "description": "Capital preservation, low volatility, income focus",
         "target_vol": 0.06,
         "max_leverage": 1.0,
         "allocation": {
-            "equity_us_large":  0.15,
-            "equity_global":    0.05,
-            "equity_us_value":  0.05,
-            "bond_us_total":    0.35,
-            "bond_us_long":     0.10,
-            "bond_intl":        0.10,
-            "commodity_gold":   0.10,
-            "cash":             0.10,
+            # Equities 20%
+            "SPY": 0.10, "EFA": 0.05, "XLV": 0.05,
+            # Fixed income 45%
+            "BND": 0.25, "TLT": 0.10, "TIP": 0.10,
+            # Real assets 20%
+            "GLD": 0.08, "VNQ": 0.07, "DBC": 0.05,
+            # Cash 15%
+            "cash": 0.15,
         },
-        "hedge_ratio": 0.20,  # % of equity hedged with puts
+        "hedge_ratio": 0.20,
     },
     "moderate": {
         "description": "Balanced growth and income, moderate drawdowns",
         "target_vol": 0.12,
         "max_leverage": 1.0,
         "allocation": {
-            "equity_us_large":  0.25,
-            "equity_global":    0.10,
-            "equity_us_growth": 0.05,
-            "equity_us_value":  0.05,
-            "bond_us_total":    0.20,
-            "bond_us_long":     0.05,
-            "bond_intl":        0.05,
-            "bond_em":          0.05,
-            "commodity_gold":   0.10,
-            "cash":             0.10,
+            # Equities 43%
+            "SPY": 0.15, "VT": 0.08, "EFA": 0.05, "IWM": 0.05,
+            "XLK": 0.05, "XLF": 0.03, "XLE": 0.02,
+            # Fixed income 22%
+            "BND": 0.12, "TLT": 0.05, "TIP": 0.05,
+            # Real assets 25%
+            "GLD": 0.08, "VNQ": 0.07, "DBC": 0.05, "XLV": 0.05,
+            # Cash 10%
+            "cash": 0.10,
         },
         "hedge_ratio": 0.10,
     },
@@ -87,38 +108,22 @@ RISK_TIERS = {
         "target_vol": 0.20,
         "max_leverage": 1.3,
         "allocation": {
-            "equity_us_large":  0.30,
-            "equity_global":    0.15,
-            "equity_us_growth": 0.15,
-            "equity_us_total":  0.10,
-            "bond_us_total":    0.05,
-            "bond_em":          0.05,
-            "commodity_gold":   0.10,
-            "cash":             0.10,
+            # Equities 58%
+            "SPY": 0.15, "VT": 0.10, "EFA": 0.05, "EEM": 0.05,
+            "IWM": 0.08, "XLK": 0.10, "XLE": 0.05,
+            # Fixed income 9%
+            "BND": 0.05, "TIP": 0.04,
+            # Real assets 23%
+            "GLD": 0.07, "VNQ": 0.05, "DBC": 0.08, "XLF": 0.03,
+            # Cash 10%
+            "cash": 0.10,
         },
         "hedge_ratio": 0.05,
     },
 }
 
-# Map asset class buckets to preferred ticker
-ASSET_CLASS_TO_TICKER = {
-    "equity_us_large":  "SPY",
-    "equity_global":    "VT",
-    "equity_us_total":  "VTI",
-    "equity_us_value":  "SPYV",
-    "equity_us_growth": "SPYG",
-    "equity_us_tech":   "NVDA",
-    "bond_us_total":    "BND",
-    "bond_us_long":     "TLT",
-    "bond_intl":        "BNDX",
-    "bond_em":          "VWOB",
-    "commodity_gold":   "GLD",
-    "commodity_gold_mini": "GLDM",
-    "cash":             None,  # held as USD/ILS cash
-}
-
 # ── Backtest Parameters ──────────────────────────────────────────────
 BACKTEST_START = "2021-11-15"
 BACKTEST_END = "2026-11-14"
-REBALANCE_FREQUENCY = "quarterly"  # monthly, quarterly, annual
+REBALANCE_FREQUENCY = "quarterly"
 RISK_FREE_RATE = 0.045  # ~4.5% USD risk-free (T-bills)

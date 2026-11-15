@@ -5,21 +5,18 @@ computes trade orders, and handles rebalancing.
 import numpy as np
 import pandas as pd
 from config.portfolio_config import (
-    RISK_TIERS, ASSET_CLASS_TO_TICKER, ASSET_UNIVERSE,
+    RISK_TIERS, ASSET_UNIVERSE,
     COMMISSIONS, TOTAL_USD, USD_ILS_RATE,
 )
 
 
 def get_target_allocation(risk_tier: str) -> dict[str, float]:
-    """Return {ticker: weight} for a risk tier."""
+    """Return {ticker: weight} for a risk tier (ticker-based allocations)."""
     tier = RISK_TIERS[risk_tier]
     result = {}
-    for asset_class, weight in tier["allocation"].items():
-        ticker = ASSET_CLASS_TO_TICKER.get(asset_class)
-        if ticker and weight > 0:
-            result[ticker] = result.get(ticker, 0) + weight
-        elif asset_class == "cash":
-            result["CASH"] = weight
+    for key, weight in tier["allocation"].items():
+        if weight > 0:
+            result[key.upper() if key == "cash" else key] = weight
     return result
 
 

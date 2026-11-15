@@ -132,3 +132,27 @@ def compare_strategies(
     for name, weights in strategies.items():
         results[name] = backtest_strategy(weights, start, end, initial_capital)
     return results
+
+
+def run_walk_forward(
+    weights: dict[str, float],
+    train_weeks: int = 104,
+    test_weeks: int = 26,
+    step_weeks: int = 13,
+    expanding: bool = False,
+) -> dict:
+    """Run walk-forward backtest with deflated Sharpe ratio analysis."""
+    from src.backtest.walk_forward import walk_forward_backtest, walk_forward_summary
+
+    prices_df = load_weekly_prices()
+    result = walk_forward_backtest(
+        prices_df=prices_df,
+        allocation_weights=weights,
+        train_weeks=train_weeks,
+        test_weeks=test_weeks,
+        step_weeks=step_weeks,
+        rf_annual=RISK_FREE_RATE,
+        expanding=expanding,
+    )
+    result["summary_text"] = walk_forward_summary(result) if "error" not in result else result["error"]
+    return result

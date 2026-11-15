@@ -5,12 +5,17 @@ and generates actionable portfolio recommendations with full rationale.
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from config.portfolio_config import RISK_TIERS, TOTAL_USD, USD_ILS_RATE, TOTAL_ILS
+from config.portfolio_config import RISK_TIERS, TOTAL_USD, USD_ILS_RATE, TOTAL_ILS, ASSET_UNIVERSE
 from src.market.market_data import get_all_prices, get_metrics, get_fx_rate
 from src.portfolio.allocator import build_portfolio_plan
 from src.currency.fx_manager import optimal_currency_split, loan_optimization_report
 from src.hedging.hedge_engine import recommend_hedges
 from src.risk.risk_engine import sharpe_ratio
+
+EQUITY_TICKERS = {
+    t for t, info in ASSET_UNIVERSE.items()
+    if info[1].startswith("equity") or info[1].startswith("sector")
+}
 
 
 def analyze_current_portfolio() -> dict:
@@ -98,28 +103,24 @@ def generate_recommendation(risk_tier: str = "moderate") -> dict:
     prices = get_all_prices()
     current_analysis = analyze_current_portfolio()
 
-    # Currency strategy
     fx_strategy = optimal_currency_split(
         total_ils=TOTAL_ILS,
         usd_ils_rate=get_fx_rate(),
         usd_allocation_pct=0.90,
     )
 
-    # Loan optimization
     loan_report = loan_optimization_report(
         usd_debit=-5847.04,
         ils_debit=-453.65,
         usd_ils_rate=get_fx_rate(),
     )
 
-    # Build new portfolio plan
     plan = build_portfolio_plan(
         risk_tier=risk_tier,
         total_capital=TOTAL_USD,
         prices=prices,
     )
 
-    # Hedging recommendations
     tier_config = RISK_TIERS[risk_tier]
     equity_positions = [
         {
@@ -130,7 +131,7 @@ def generate_recommendation(risk_tier: str = "moderate") -> dict:
             "implied_vol": get_metrics(ticker).get("iv", 0.20),
         }
         for ticker, pos in plan["positions"].items()
-        if ticker not in ("CASH",) and "equity" in str(RISK_TIERS.get(risk_tier, {}).get("allocation", {}).keys())
+        if ticker not in ("CASH",) and ticker in EQUITY_TICKERS
     ]
     hedges = recommend_hedges(
         portfolio_value=TOTAL_USD,
@@ -139,7 +140,6 @@ def generate_recommendation(risk_tier: str = "moderate") -> dict:
         hedge_ratio=tier_config["hedge_ratio"],
     )
 
-    # Transition plan from current to target
     transition = _build_transition_plan(current_analysis, plan)
 
     return {

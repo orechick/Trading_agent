@@ -3,7 +3,8 @@
 Automatic Portfolio Management System — Main Entry Point
 
 Connects to IBKR account data, generates portfolio recommendations across
-risk tiers, backtests strategies, and produces actionable trade plans.
+risk tiers, backtests strategies with walk-forward validation,
+and produces actionable trade plans backed by academic literature.
 
 Usage:
     python main.py [--risk conservative|moderate|aggressive] [--backtest]
@@ -11,23 +12,21 @@ Usage:
 import sys
 import os
 import argparse
-import json
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
 
 from config.portfolio_config import (
     TOTAL_ILS, TOTAL_USD, USD_ILS_RATE, RISK_TIERS,
-    BACKTEST_START, BACKTEST_END,
+    BACKTEST_START, BACKTEST_END, ALLOCATION_TICKERS,
 )
 from src.recommender.portfolio_advisor import (
     analyze_current_portfolio,
     generate_recommendation,
 )
 from src.portfolio.allocator import get_target_allocation, build_portfolio_plan
-from src.market.market_data import get_all_prices, get_metrics, get_fx_rate
+from src.market.market_data import get_all_prices, get_fx_rate
 from src.currency.fx_manager import optimal_currency_split, loan_optimization_report
-from src.risk.risk_engine import sharpe_ratio
 
 
 def print_header(title: str):
@@ -56,6 +55,7 @@ def run_analysis(risk_tier: str, run_backtest: bool = False):
     print(f"  Risk Tier: {risk_tier.upper()}")
     print(f"  Capital: {TOTAL_ILS:,.0f} ILS = {format_usd(TOTAL_USD)}")
     print(f"  USD/ILS: {USD_ILS_RATE}")
+    print(f"  Asset Universe: {len(ALLOCATION_TICKERS)} ETFs across equities, bonds, commodities, sectors, intl, REITs, TIPS")
 
     # ── Current Portfolio Analysis ────────────────────────────────
     print_header("1. CURRENT PORTFOLIO ANALYSIS")
@@ -128,8 +128,32 @@ def run_analysis(risk_tier: str, run_backtest: bool = False):
               f"@ {format_usd(order['price']):>10s}  = {format_usd(order['notional']):>12s}  "
               f"comm {format_usd(order['commission'])}")
 
+    # ── Technical Analysis ────────────────────────────────────────
+    print_header("4. TECHNICAL ANALYSIS SIGNALS")
+    try:
+        from src.backtest.ibkr_price_cache import load_weekly_prices
+        from src.analysis.technical import generate_signals, technical_summary
+
+        prices_df = load_weekly_prices()
+        signals = generate_signals(prices_df)
+
+        print(f"  {'Ticker':<6s} {'Trend':<10s} {'Momentum':<10s} {'Score':>8s} "
+              f"{'RSI':>8s} {'MACD_H':>10s} {'Stoch_K':>8s}")
+        print(f"  {'-'*68}")
+        for ticker in ALLOCATION_TICKERS:
+            if ticker in signals:
+                s = signals[ticker]
+                ind = s["indicators"]
+                print(f"  {ticker:<6s} {s['trend']:<10s} {s['momentum']:<10s} "
+                      f"{s['signal_score']:>+7.3f} "
+                      f"{ind.get('rsi_14', 0):>8.1f} "
+                      f"{ind.get('macd_histogram', 0):>10.4f} "
+                      f"{ind.get('stoch_k', 0):>8.1f}")
+    except Exception as e:
+        print(f"  Technical analysis error: {e}")
+
     # ── Hedging Strategies ────────────────────────────────────────
-    print_header("4. HEDGING & INSURANCE")
+    print_header("5. HEDGING & INSURANCE")
     for hedge in rec["hedging_strategies"]:
         print(f"  Strategy: {hedge['name']}")
         print(f"  {hedge['description']}")
@@ -140,7 +164,7 @@ def run_analysis(risk_tier: str, run_backtest: bool = False):
         print()
 
     # ── Transition Plan ───────────────────────────────────────────
-    print_header("5. TRANSITION PLAN")
+    print_header("6. TRANSITION PLAN")
     transition = rec["transition_plan"]
     for step in transition["steps"]:
         print(f"  Step {step['step']}: {step['action']}")
@@ -153,27 +177,29 @@ def run_analysis(risk_tier: str, run_backtest: bool = False):
     print(f"  Total Transition Cost: {format_usd(transition['estimated_total_transition_cost_usd'])}")
     print(f"  Timeline: {transition['estimated_time_to_complete']}")
 
-    # ── Compare All Risk Tiers ────────────────────────────────────
-    print_header("6. RISK TIER COMPARISON")
-    print(f"  {'Tier':<15s} {'Target Vol':>10s} {'Max Lever':>10s} "
-          f"{'Equity %':>10s} {'Bond %':>10s} {'Gold %':>8s} {'Cash %':>8s}")
-    print(f"  {'-'*73}")
+    # ── Risk Tier Comparison ──────────────────────────────────────
+    print_header("7. RISK TIER COMPARISON")
+    print(f"  {'Tier':<15s} {'Target Vol':>10s} {'Equity %':>10s} {'Bond %':>10s} "
+          f"{'Real %':>10s} {'Cash %':>8s}")
+    print(f"  {'-'*65}")
+    equity_tickers = {"SPY", "VT", "XLK", "XLF", "XLE", "XLV", "EFA", "EEM", "IWM"}
+    bond_tickers = {"BND", "TLT", "TIP"}
+    real_tickers = {"GLD", "VNQ", "DBC"}
     for tier_name, tier_config in RISK_TIERS.items():
         alloc = tier_config["allocation"]
-        equity = sum(v for k, v in alloc.items() if "equity" in k) * 100
-        bonds = sum(v for k, v in alloc.items() if "bond" in k) * 100
-        gold = sum(v for k, v in alloc.items() if "commodity" in k) * 100
+        equity = sum(v for k, v in alloc.items() if k in equity_tickers) * 100
+        bonds = sum(v for k, v in alloc.items() if k in bond_tickers) * 100
+        real_assets = sum(v for k, v in alloc.items() if k in real_tickers) * 100
         cash = alloc.get("cash", 0) * 100
         marker = " <--" if tier_name == risk_tier else ""
         print(f"  {tier_name:<15s} {tier_config['target_vol']*100:>9.0f}% "
-              f"{tier_config['max_leverage']:>10.1f} "
-              f"{equity:>9.0f}% {bonds:>9.0f}% {gold:>7.0f}% {cash:>7.0f}%{marker}")
+              f"{equity:>9.0f}% {bonds:>9.0f}% {real_assets:>9.0f}% {cash:>7.0f}%{marker}")
 
     # ── Backtest ──────────────────────────────────────────────────
     if run_backtest:
-        print_header("7. BACKTESTING RESULTS")
+        print_header("8. BACKTESTING RESULTS")
         try:
-            from src.backtest.backtester import compare_strategies
+            from src.backtest.backtester import compare_strategies, run_walk_forward
 
             strategies = {}
             for tier_name in RISK_TIERS:
@@ -198,16 +224,44 @@ def run_analysis(risk_tier: str, run_backtest: bool = False):
                       f"{m.get('sharpe_ratio', 0):>8.2f} "
                       f"{m.get('max_drawdown_pct', 0):>+7.1f}% "
                       f"{format_usd(m.get('final_value_usd', 0)):>12s}")
+
+            # Walk-forward validation for the selected tier
+            print_section(f"Walk-Forward Validation ({risk_tier})")
+            wf_weights = get_target_allocation(risk_tier)
+            wf = run_walk_forward(wf_weights)
+            if "error" in wf:
+                print(f"  {wf['error']}")
+            else:
+                print(wf["summary_text"])
+
         except Exception as e:
             print(f"  Backtest error: {e}")
-            print("  (Run with internet access for yfinance data)")
+            import traceback
+            traceback.print_exc()
+
+    # ── Academic Methodology ──────────────────────────────────────
+    print_header("9. METHODOLOGY & ACADEMIC BACKING")
+    try:
+        from src.research.literature import get_all_citations, format_citation
+        citations = get_all_citations()
+        print(f"  This system's methodology is backed by {len(citations)} peer-reviewed papers:\n")
+        by_cat = {}
+        for c in citations:
+            by_cat.setdefault(c["category"], []).append(c)
+        for cat, papers in by_cat.items():
+            print(f"  {cat.replace('_', ' ').title()}:")
+            for p in papers:
+                print(f"    - {format_citation(p)}")
+            print()
+    except Exception as e:
+        print(f"  Literature module error: {e}")
 
     print_header("DISCLAIMER")
     print("  This is a quantitative analysis tool, NOT financial advice.")
     print("  Past performance does not guarantee future results.")
     print("  All investments carry risk of loss.")
     print("  Consult a licensed financial advisor before making trades.")
-    print("  Data sourced from IBKR live feed and yfinance historical data.")
+    print("  Data sourced from IBKR live feed and pre-fetched price history.")
     print()
 
 
